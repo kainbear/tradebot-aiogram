@@ -6,6 +6,14 @@ from aiogram.types import ParseMode, InlineKeyboardButton, InlineKeyboardMarkup
 from aiogram.contrib.middlewares.logging import LoggingMiddleware
 from aiogram.utils import executor
 
+from pyrogram import Client
+import logging
+import asyncio
+from aiogram import Bot, Dispatcher, types
+from aiogram.types import ParseMode, InlineKeyboardButton, InlineKeyboardMarkup
+from aiogram.contrib.middlewares.logging import LoggingMiddleware
+from aiogram.utils import executor
+
 # Токен вашего бота
 API_TOKEN = "7735642608:AAG1HgbLkfOsj8EmnLY2IYaOCwCEEd-9Zbs"
 
@@ -15,11 +23,18 @@ CHANNEL_ID = "@asdtest41w"
 # Ваш ID в Telegram, который будет использоваться для проверки прав администратора
 ADMIN_USER_ID = 1046944985
 
+# Your API credentials for Pyrogram (Replace with actual values)
+API_ID = "25432811"  # Replace with your api_id
+API_HASH = "76ccba0da25c56fec0667084db89b6e6"  # Replace with your api_hash
+
 logging.basicConfig(level=logging.INFO)
 
 bot = Bot(token=API_TOKEN)
 dp = Dispatcher(bot)
 dp.middleware.setup(LoggingMiddleware())
+
+# Pyrogram client для работы с участниками
+app = Client("my_bot", bot_token=API_TOKEN, api_id=API_ID, api_hash=API_HASH)
 
 
 # Функция для создания главного меню с кнопками (разделение на три ряда)
@@ -27,11 +42,18 @@ def get_main_menu():
     keyboard = InlineKeyboardMarkup(row_width=2)  # Указываем два столбца в ряду
     # Добавляем кнопки
     keyboard.add(
-        InlineKeyboardButton("Оповестить подписчиков Начало Торгов", callback_data="notify_all"),
+        InlineKeyboardButton(
+            "Оповестить подписчиков Начало Торгов", callback_data="notify_all"
+        ),
         InlineKeyboardButton("Оповестить подписчиков в лс", callback_data="notifpod"),
     )
     keyboard.add(
         InlineKeyboardButton("Кругляш с кнопкой", callback_data="addvid"),
+    )
+    keyboard.add(
+        InlineKeyboardButton(
+            "Получить список участников", callback_data="get_all_chambers"
+        ),
     )
     return keyboard
 
@@ -74,10 +96,16 @@ async def send_message_to_channel(
 async def send_message_to_users(message_text: str):
     try:
         # Получаем список всех участников канала
-        members = await bot.get_chat_members(CHANNEL_ID, 0, 200)  # Получаем первые 200 участников
+        members = await bot.get_chat_members(
+            CHANNEL_ID, 0, 200
+        )  # Получаем первые 200 участников
         for member in members:
             # Проверка, является ли пользователь подписчиком
-            if member.status in ['member', 'administrator', 'creator']:  # проверяем активных участников
+            if member.status in [
+                "member",
+                "administrator",
+                "creator",
+            ]:  # проверяем активных участников
                 try:
                     # Отправка личного сообщения
                     await bot.send_message(
@@ -87,7 +115,9 @@ async def send_message_to_users(message_text: str):
                     )
                     logging.info(f"Сообщение отправлено пользователю {member.user.id}")
                 except Exception as e:
-                    logging.error(f"Ошибка при отправке сообщения пользователю {member.user.id}: {e}")
+                    logging.error(
+                        f"Ошибка при отправке сообщения пользователю {member.user.id}: {e}"
+                    )
     except Exception as e:
         logging.error(f"Ошибка при получении участников канала: {e}")
 
@@ -180,15 +210,11 @@ async def addvid(callback_query: types.CallbackQuery):
             keyboard = InlineKeyboardMarkup().add(info_button)
 
             # Формируем сообщение с видео и кнопкой
-            await message.answer_video(
-                video.file_id, reply_markup=keyboard
-            )
+            await message.answer_video(video.file_id, reply_markup=keyboard)
 
             # Отправляем сообщение в нужную группу (замените group_id на актуальный)
             group_id = "@asdtest41w"
-            await dp.bot.send_video(
-                group_id, video.file_id, reply_markup=keyboard
-            )
+            await dp.bot.send_video(group_id, video.file_id, reply_markup=keyboard)
 
             # Подтверждаем пользователю, что видео отправлено
             await message.answer(
@@ -199,12 +225,40 @@ async def addvid(callback_query: types.CallbackQuery):
         await callback_query.answer(f"Произошла ошибка: {str(e)}")
 
 
+# Обработчик нажатия на кнопку "Получить список участников"
+@dp.callback_query_handler(lambda c: c.data == "get_all_chambers")
+async def get_all_chambers(callback_query: types.CallbackQuery):
+    # Проверка, является ли пользователь администратором
+    if callback_query.from_user.id != ADMIN_USER_ID:
+        await callback_query.answer("У вас нет прав для использования этой функции.")
+        return
+
+    try:
+        # Получаем всех участников канала с помощью Pyrogram
+        members = []
+        async for member in app.get_chat_members(CHANNEL_ID):
+            members.append(f"{member.user.id} - {member.user.username}")
+
+        # Отправляем список участников в чат
+        members_list = "\n".join(members)
+        await callback_query.message.answer(
+            f"Список участников канала:\n\n{members_list}"
+        )
+
+    except Exception as e:
+        await callback_query.answer(
+            f"Произошла ошибка при получении списка участников: {e}"
+        )
+
+
 # Функция запуска бота
 async def on_start():
-    # Запускаем бота с обработкой поллинга
+    # Запускаем Pyrogram client в фоновом режиме
+    await app.start()
+
+    # Запускаем бота с помощью aiogram
     await dp.start_polling()
 
-
 if __name__ == "__main__":
-    # Используем executor для корректного старта бота
-    executor.start_polling(dp, skip_updates=True)
+    # Запускаем основную асинхронную функцию
+    app.run(on_start())
